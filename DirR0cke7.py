@@ -121,7 +121,7 @@ for length_range in length_ranges:
 
     # Cria uma função de verificação para o intervalo
     def is_within_range(length, start=start, end=end):
-        return start <= length >= end
+        return start <= length <= end
 
     # Adiciona a função de verificação à lista
     range_checks.append(is_within_range)
