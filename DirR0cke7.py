@@ -37,6 +37,7 @@ import threading
 import subprocess
 import requests
 import readline
+import os
 from pathlib import Path
 from concurrent import futures
 import signal
@@ -62,9 +63,8 @@ except PermissionError:
     print("Permissão negada para executar o comando 'tor'. Verifique suas permissões.")
 
 # Faz as configurações necessárias
-with subprocess.Popen(['sudo', 'systemctl', 'start', 'tor']) as tor_process:
-    tor_process.wait()
-    subprocess.run(['sudo', 'systemctl', 'enable', 'tor'])
+subprocess.run(['sudo', 'systemctl', 'start', 'tor'])
+subprocess.run(['sudo', 'systemctl', 'enable', 'tor'])
 
 # Solicita a URL alvo ao usuário
 target_url = input("Digite a URL alvo: ")
@@ -75,14 +75,14 @@ num_threads = int(input("Digite a quantidade de threads desejada: "))
 # Solicita o caminho da Wordlist ao usuário
 def complete_path(text, state):
     if '~' in text:
-        text = Path.expanduser(text)
-    path = Path.dirname(text)
+        text = os.path.expanduser(text)
+    path = os.path.dirname(text)
     if not path:
         path = './'
     line_buffer = readline.get_line_buffer()
-    line_buffer = Path.expanduser(line_buffer)
+    line_buffer = os.path.expanduser(line_buffer)
     if '~' in line_buffer:
-        line_buffer = Path.expanduser(line_buffer)
+        line_buffer = os.path.expanduser(line_buffer)
     names = os.listdir(path)
     matches = [name for name in names if name.startswith(line_buffer)]
     return matches[state]
@@ -100,13 +100,48 @@ with wordlist_path.open('r') as wordlist_file:
         full_url = target_url + '/' + directory
         directories.append(full_url)
 
+# Solicita os intervalos de comprimento para ignorar
+length_ranges = input("Digite os intervalos de comprimento para ignorar (exemplo: 6000-6999,80555,7000-7050): ").strip().split(',')
+
+# Lista para armazenar as funções de verificação de intervalo
+range_checks = []
+
+# Função para verificar se o comprimento está dentro de qualquer intervalo especificado
+def is_within_any_range(length):
+    return any(check(length) for check in range_checks)
+
+# Processa cada intervalo fornecido pelo usuário
+for length_range in length_ranges:
+    # Divide o intervalo em início e fim
+    range_parts = length_range.strip().split('-')
+
+    # Converte os valores para inteiros
+    start = int(range_parts[0].strip())
+    end = int(range_parts[-1].strip())
+
+    # Cria uma função de verificação para o intervalo
+    def is_within_range(length, start=start, end=end):
+        return start <= length <= end
+
+    # Adiciona a função de verificação à lista
+    range_checks.append(is_within_range)
+
+# Verifica se o comprimento está dentro de qualquer intervalo especificado
+def is_within_ranges(length):
+    return not is_within_any_range(length)
+
 # Função para verificar um diretório
 def check_directory(directory):
     try:
         response = requests.get(directory, timeout=1)
         if response.status_code in [200, 301, 302]:
-            with print_lock:
-                print("\n\033[92mDiretório encontrado:\033[0m", directory)
+            content_type = response.headers.get('content-type', '').lower()
+            if 'text/html' in content_type:
+                content_length = len(response.content)
+                if is_within_ranges(content_length):
+                    with print_lock:
+                        print("\n\033[92mDiretório encontrado:\033[0m", directory)
+                        print("\033[93mLength:\033[0m", content_length)
     except (requests.RequestException, requests.Timeout):
         pass
 
@@ -114,10 +149,10 @@ def check_directory(directory):
 def divide_list(lst, n):
     avg = len(lst) // n
     out = []
-    last = 0.0
+    last = 0
 
     while last < len(lst):
-        out.append(lst[int(last):int(last + avg)])
+        out.append(lst[last:last + avg])
         last += avg
 
     return out
